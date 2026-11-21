@@ -1,383 +1,400 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
-let vel = 0.0;
-let voar = 0.0;
-let rumo = 0.0;
-let velSol = 0.0;
-let velSol2 = 1.046;
-let velVoo = 0.0;
-let velocidadeAngular = 0.0;
-let acel = 0.0;
-var limiteMinY = 3;
-var robo;
-var arvore;
+// ===== Configuração =====
+const TOTAL_ESFERAS = 5
+const RAIO_COLETA = 2.5
+const VEL_ESFERA = 5 // velocidade das esferas (o jogador chega a 30)
+const VEL_MAX = 30 // unidades por segundo
+const ACEL = 40
+const GIRO = 2.5 // radianos por segundo
+const ALTURA_MIN = 2.5 // altura mínima do robô
+const ALTURA_MAX = 60
 
-function foiAtingido(X1, Y1, Z1, X2, Y2, Z2){
-	var deltaX = X1 - X2;
-	var deltaY = Y1 - Y2;
-	var deltaZ = Z1 - Z2;
-	var dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
-	return dist < 1.5;
+// ===== HUD =====
+const $ = (id) => document.getElementById(id)
+const hudPlacar = $('placar')
+const hudTempo = $('tempo')
+let placar = 0
+let tempo = 0
+let jogando = false
+
+function atualizarPlacar() {
+  hudPlacar.textContent = `Esferas: ${placar}/${TOTAL_ESFERAS}`
 }
-//Som
-/*const listener = new THREE.AudioListener();
-const audioLoader = new THREE.AudioLoader();
-const sound = new THREE.PositionalAudio(listener);*/
+atualizarPlacar()
 
-// Inicialize a cena
-var scene = new THREE.Scene();
+$('botao-proxima-fase').addEventListener('click', () => (location.href = 'index2.html'))
+$('botao-reiniciar').addEventListener('click', () => location.reload())
 
-// Crie uma câmera
-var camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 3, 0);
-
-// Crie uma renderização
-const renderer = new THREE.WebGLRenderer();
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-//Criação das sombras
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-// Criação do plano
-var geometry = new THREE.PlaneGeometry(200, 200);
-var material = new THREE.MeshStandardMaterial({ color: 0x000000, side:THREE.DoubleSide });
-var surface = new THREE.Mesh(geometry, material);
-surface.receiveShadow = true;
-scene.add(surface);
-
-
-
-
-//Criação do cenário
-let materialArray = [];
-let texture_ft = new THREE.TextureLoader().load('paisagem/violence_ft.jpg');
-let texture_bk = new THREE.TextureLoader().load('paisagem/violence_bk.jpg');
-let texture_up = new THREE.TextureLoader().load('paisagem/violence_up.jpg');
-let texture_dn = new THREE.TextureLoader().load('paisagem/violence_dn.jpg');
-let texture_rt = new THREE.TextureLoader().load('paisagem/violence_rt.jpg'); 
-let texture_lf = new THREE.TextureLoader().load('paisagem/violence_lf.jpg');
-
-materialArray.push(new THREE.MeshBasicMaterial({map: texture_ft})); 
-materialArray.push(new THREE.MeshBasicMaterial({map: texture_bk})); 
-materialArray.push (new THREE.MeshBasicMaterial({map: texture_up})); 
-materialArray.push(new THREE.MeshBasicMaterial({map: texture_dn})); 
-materialArray.push (new THREE.MeshBasicMaterial ({map: texture_rt})); 
-materialArray.push(new THREE.MeshBasicMaterial ({map: texture_lf}));
-
-for(let i= 0; i<6; i++){
-  materialArray[i].side=THREE.BackSide;
+function vencer() {
+  jogando = false
+  document.exitPointerLock()
+  $('tempo-final').textContent = `${tempo.toFixed(1)} s`
+  $('mensagem-vitoria').style.display = 'block'
 }
 
-let skyboxGeo = new THREE.BoxGeometry(400,200,400);
-let skybox = new THREE.Mesh(skyboxGeo, materialArray);
-skybox.position.y = 80;
-scene.add(skybox);
+// ===== Cena, câmera e renderizador =====
+const scene = new THREE.Scene()
+const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000)
+camera.position.set(0, ALTURA_MIN, 0)
+const jogador = new THREE.Vector3(0, ALTURA_MIN, 0) // posição real do robô (colisão e movimento)
 
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+renderer.setSize(innerWidth, innerHeight)
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
+document.body.appendChild(renderer.domElement)
 
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize(innerWidth, innerHeight)
+})
 
+// Tela de carregamento: some quando texturas e modelos terminarem
+const manager = new THREE.LoadingManager()
+manager.onLoad = () => {
+  $('carregando').style.display = 'none'
+  jogando = true
+}
+const texLoader = new THREE.TextureLoader(manager)
+const gltfLoader = new GLTFLoader(manager)
 
+// ===== Chão e céu =====
+const chao = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshStandardMaterial({ color: 0x000000, side: THREE.DoubleSide })
+)
+chao.rotation.x = -Math.PI / 2
+chao.receiveShadow = true
+scene.add(chao)
 
-//Esfera para ser ponto de referência
-const geometry0 = new THREE.SphereGeometry( 1, 15, 16 ); 
-const material0 = new THREE.MeshBasicMaterial( { color: 0xffffff} ); 
-const sphere0 = new THREE.Mesh( geometry0, material0 ); 
-sphere0.position.set(0, -1, 0);
-scene.add( sphere0 );
+const faces = ['ft', 'bk', 'up', 'dn', 'rt', 'lf']
+const ceu = new THREE.Mesh(
+  new THREE.BoxGeometry(400, 200, 400),
+  faces.map((f) => new THREE.MeshBasicMaterial({ map: texLoader.load(`paisagem/violence_${f}.jpg`), side: THREE.BackSide }))
+)
+ceu.position.y = 80
+scene.add(ceu)
 
-let boxWidth = 5;
-let boxHeight = 0;
-let boxDepth = 5;
-let gap = 2; // Espaço entre as caixas
+// ===== Cidade (uma única malha instanciada) =====
+const LARG = 5
+const GAP = 2
+const COLS = 6
+const LINHAS = 6
+const BLOCOS_X = 3
+const BLOCOS_Z = 4
+const larguraTotal = BLOCOS_X * (COLS * LARG + (COLS - 1) * GAP) + (BLOCOS_X - 1) * 10
+const profundidadeTotal = BLOCOS_Z * (LINHAS * LARG + (LINHAS - 1) * GAP) + (BLOCOS_Z - 1) * 10
 
-let numBlocosCols = 3;
-let numBlocosRows = 4;
-let numRows = 6; // Número de linhas
-let numCols = 6; // Número de colunas
-let totalWidth = numBlocosCols * (numCols*boxWidth + (numCols-1)*gap) + (numBlocosCols - 1) * 10;
-let totalDepth = numBlocosRows * (numRows*boxDepth + (numRows-1)*gap) + (numBlocosRows - 1) * 10;
-for (let y = 0; y < numBlocosRows; y++){
-	for (let k = 0; k < numBlocosCols; k++ ){
-		for (let i = 0; i < numRows; i++) {
-			for (let j = 0; j < numCols; j++) {
-			boxHeight = 5 + (Math.random() * 20);
-			const geometryBox = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
-			//const moonTextureBox = new THREE.TextureLoader().load("Imagens/2k_mars.jpg");
-			const materialBox = new THREE.MeshStandardMaterial({color: 0xFFFFFF});
-			//materialBox.map = moonTextureBox;
-			const pre1 = new THREE.Mesh(geometryBox, materialBox);
-			pre1.castShadow = true;
-			pre1.receiveShadow = true;
-		
-			// Calcula as posições das caixas
-			const xPosition = (j * (boxWidth + gap) + k * (numCols*boxWidth + (numCols-1)*gap + 10)) - ((totalWidth / 2) - (boxWidth / 2));
-			const zPosition = (i * (boxDepth + gap) + y * (numRows*boxDepth + (numRows-1)*gap + 10)) - ((totalDepth / 2) - (boxDepth / 2));
-		
-			pre1.position.set(xPosition, (boxHeight) / 2, zPosition); // Define a posição da caixa
-			scene.add(pre1); // Adiciona a caixa à cena
-			}
-		}
-	}
+const predios = [] // { x, z, h } usados na colisão
+for (let y = 0; y < BLOCOS_Z; y++)
+  for (let k = 0; k < BLOCOS_X; k++)
+    for (let i = 0; i < LINHAS; i++)
+      for (let j = 0; j < COLS; j++) {
+        predios.push({
+          x: j * (LARG + GAP) + k * (COLS * LARG + (COLS - 1) * GAP + 10) - (larguraTotal / 2 - LARG / 2),
+          z: i * (LARG + GAP) + y * (LINHAS * LARG + (LINHAS - 1) * GAP + 10) - (profundidadeTotal / 2 - LARG / 2),
+          h: 5 + Math.random() * 20
+        })
+      }
+
+const cidade = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshStandardMaterial({ color: 0xffffff }),
+  predios.length
+)
+const molde = new THREE.Object3D()
+const cor = new THREE.Color()
+predios.forEach((p, n) => {
+  molde.position.set(p.x, p.h / 2, p.z)
+  molde.scale.set(LARG, p.h, LARG)
+  molde.updateMatrix()
+  cidade.setMatrixAt(n, molde.matrix)
+  cidade.setColorAt(n, cor.setHSL(0, 0, 0.6 + Math.random() * 0.4))
+})
+cidade.castShadow = true
+cidade.receiveShadow = true
+cidade.frustumCulled = false
+scene.add(cidade)
+
+// ===== Colisão =====
+// Grade espacial: cada consulta olha só os prédios por perto (em vez dos 432)
+const CELULA = 8
+const grade = new Map()
+const chave = (ix, iz) => ix * 1000 + iz
+for (const p of predios) {
+  const k = chave(Math.floor(p.x / CELULA), Math.floor(p.z / CELULA))
+  if (!grade.has(k)) grade.set(k, [])
+  grade.get(k).push(p)
+}
+function vizinhos(x, z) {
+  const cx = Math.floor(x / CELULA)
+  const cz = Math.floor(z / CELULA)
+  const lista = []
+  for (let i = -1; i <= 1; i++)
+    for (let j = -1; j <= 1; j++) {
+      const celula = grade.get(chave(cx + i, cz + j))
+      if (celula) lista.push(...celula)
+    }
+  return lista
 }
 
-var objetos = [];
-
-const loader = new GLTFLoader();
-
-for (let q = 0; q < 5; q++){
-	let posX = Math.random();
-	let posY = Math.random();
-	let localSphereX = Math.random() * totalWidth;
-	let localSphereZ = Math.random() * totalDepth;
-	const geometrySphe = new THREE.SphereGeometry( 1, 15, 16 ); 
-	const moonTextureSphe = new THREE.TextureLoader().load("Imagens/2k_mars.jpg");
-	const materialSphe = new THREE.MeshPhongMaterial(); 
-	materialSphe.map = moonTextureSphe;
-	const sphere = new THREE.Mesh( geometrySphe, materialSphe ); 
-	scene.add( sphere );
-
-	if(posX < 0.5 && posY < 0.5){
-		sphere.position.set(-localSphereX + (localSphereX / 2), 2, - localSphereZ + (localSphereZ / 2)); 
-	}else if(posX > 0.5 && posY < 0.5){
-		sphere.position.set(localSphereX - (localSphereX / 2), 2, -localSphereZ + (localSphereZ / 2));
-	}else if(posX < 0.5 && posY > 0.5){
-		sphere.position.set(-localSphereX + (localSphereX / 2), 2, localSphereZ - (localSphereZ / 2));
-	}else{
-		sphere.position.set(localSphereX - (localSphereX / 2), 2, localSphereZ - (localSphereZ / 2));
-	}
-
-	objetos.push(sphere);
+// Teste simples "este ponto está dentro de um prédio?" (usado nas esferas e no robô)
+function bate(x, y, z, m = 0.8) {
+  return vizinhos(x, z).some((p) => Math.abs(p.x - x) < LARG / 2 + m && Math.abs(p.z - z) < LARG / 2 + m && y < p.h + m)
 }
 
-loader.load(    'modelos/coot_the_robot.glb',
-                function ( gltf ) {
-                    robo = gltf.scene;
-                    scene.add( gltf.scene );
-                },
-                undefined,
-                function ( error ) {
-                    console.error( error );
-                }
-);
+// Jogador = círculo de RAIO no chão + margem vertical. Em vez de travar, empurra para fora
+// pela saída mais curta: desliza nas paredes, contorna quinas e pousa nos telhados.
+const RAIO = 1.0
+const MARGEM_Y = 0.8
+function resolver(p) {
+  const meio = LARG / 2
+  let pousou = false
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    let mexeu = false
+    for (const b of vizinhos(p.x, p.z)) {
+      if (p.y >= b.h + MARGEM_Y) continue
+      const cx = THREE.MathUtils.clamp(p.x, b.x - meio, b.x + meio)
+      const cz = THREE.MathUtils.clamp(p.z, b.z - meio, b.z + meio)
+      let dx = p.x - cx
+      let dz = p.z - cz
+      const d = Math.hypot(dx, dz)
+      if (d >= RAIO) continue
 
-/*for (let q = 0; q < 10 ; q++){
-	loader.load('modelos/arvore.glb',
-					function ( gltf ) {
-						arvore = gltf.scene;
-						arvore.position.set(
-							100, 
-							0, 
-							200 - (Math.random()*100));
-						arvore.scale.set(15, 15, 15);
-						scene.add( gltf.scene );
-					},
-					undefined,
-					function ( error ) {
-						console.error( error );
-					}
-	);
-}*/
-
-const geometrySpheRob = new THREE.SphereGeometry( 0.5, 15, 16 ); 
-const materialSpheRob = new THREE.MeshBasicMaterial( { color: 0x00ff00, transparent: true, opacity: 0.0} ); 
-const sphereRob = new THREE.Mesh( geometrySpheRob, materialSpheRob ); 
-scene.add( sphereRob );
-
-const light = new THREE.PointLight( 0xFFFFFF, 3, 6 );
-light.position.set(0, 0, 0);
-scene.add( light );
-
-const lightObj = new THREE.HemisphereLight( 0x777777, 0x000000, 1 );
-scene.add( lightObj );
-
-const directionalLight = new THREE.DirectionalLight( 0xFC5404, 16);
-directionalLight.position.set(totalWidth/2, 30, 0);
-directionalLight.shadow.camera.left = 90;
-directionalLight.shadow.camera.right = -90 ;
-directionalLight.shadow.camera.top = 80;
-directionalLight.shadow.camera.bottom = -80;
-directionalLight.castShadow = true;
-directionalLight.target = sphere0;
-scene.add( directionalLight );
-
-//Configurando as propriedades da sombra
-directionalLight.shadow.mapSize.width = 4096;
-directionalLight.shadow.mapSize.height = 4096;
-directionalLight.shadow.camera.near = 0.8;
-directionalLight.shadow.camera.far = 1000;
-
-//const helper = new THREE.CameraHelper( directionalLight.shadow.camera );
-//scene.add( helper );
-
-//Esfera para ser o Sol
-const geometrySol = new THREE.SphereGeometry( 10, 15, 16 ); 
-const moonTextureSol = new THREE.TextureLoader().load("Imagens/Sol.jpeg");
-const materialSol = new THREE.MeshPhongMaterial({emissive: 0xFC5404, emissiveIntensity: 0.8});
-materialSol.map = moonTextureSol; 
-const sphereSol = new THREE.Mesh( geometrySol, materialSol ); 
-sphereSol.position.set((totalWidth / 2) + 20, 0, 0);
-scene.add( sphereSol );
-
-const geometryLua = new THREE.SphereGeometry( 10, 15, 16 ); 
-const moonTexture = new THREE.TextureLoader().load("Imagens/Lua.jpeg");
-const materialLua = new THREE.MeshPhongMaterial();
-materialLua.map = moonTexture; 
-const sphereLua = new THREE.Mesh( geometryLua, materialLua ); 
-sphereLua.position.set(-((totalWidth / 2) + 20), 0, 0);
-scene.add( sphereLua );
-
-var animate = function () {
-requestAnimationFrame(animate);
-
-/*audioLoader.load(`Sound/rda.mp3`, function (buffer) {
-	sound.setBuffer(buffer);
-	sound.setLoop(true);
-	sound.play();
-});*/
-
-surface.rotation.x = 1.5708;
-camera.position.x += -vel * Math.sin(rumo);
-camera.position.z += -vel * Math.cos(rumo);
-camera.position.y += voar;
-if(camera.position.y < limiteMinY){
-	voar = 0;	
-	} 
-if(camera.position.x >= (totalWidth / 2) - 10){
-	camera.position.x = camera.position.x - 2;
-}
-if(camera.position.x <= -(totalWidth / 2) + 10){
-	camera.position.x = camera.position.x + 2;
-}
-if(camera.position.z >= (totalDepth / 2) - 10){
-	camera.position.z = camera.position.z - 2;
-}
-if(camera.position.z <= -(totalDepth / 2) + 10){
-	camera.position.z = camera.position.z + 2;
-}
-if(camera.position.y >= (totalDepth / 2) - 20){
-	camera.position.y = camera.position.y - 2;
-}
-if(camera.position.x >= (totalWidth / 2) + 10 || 
-	camera.position.x <= -(totalWidth / 2) - 10 || 
-	camera.position.z >= (totalDepth / 2) + 10 || 
-	camera.position.z <= -(totalDepth / 2) - 10 ||
-	camera.position.y >= (totalDepth / 2)){
-		camera.position.set(0, limiteMinY, 0);
-	}
-
-
-robo.position.x = (- 2 * Math.sin(rumo)) + camera.position.x;
-robo.position.y = camera.position.y - 0.5;
-robo.position.z = (- 2 * Math.cos(rumo)) + camera.position.z;
-robo.rotation.y = 3.14 + rumo;
-
-sphereRob.position.x = robo.position.x;
-sphereRob.position.y = robo.position.y;
-sphereRob.position.z = robo.position.z;
-
-light.position.x = (- 0.75 * Math.sin(rumo)) + camera.position.x;;
-light.position.y = robo.position.y + 1;
-light.position.z = (- 0.75 * Math.cos(rumo)) + camera.position.z;
-
-velSol += 0.001;
-sphereSol.position.x = (totalWidth / 2 + 100) * Math.sin(velSol) * Math.sin(velSol2);
-sphereSol.position.y = (totalWidth / 2 + 100) * Math.cos(velSol);
-sphereSol.position.z = ((totalWidth / 2 + 100)*2) * Math.sin(velSol) * Math.cos(velSol2);
-
-sphereLua.position.x = - sphereSol.position.x;
-sphereLua.position.y = - sphereSol.position.y;
-sphereLua.position.z = - sphereSol.position.z;
-
-if(sphereSol.position.y > 0){
-	directionalLight.intensity = sphereSol.position.y / 10;
-} else {
-	directionalLight.intensity = sphereLua.position.y / 10;
+      let penH = RAIO - d
+      if (d === 0) {
+        // centro dentro da caixa: sai pela face mais próxima
+        const ex = meio - Math.abs(p.x - b.x)
+        const ez = meio - Math.abs(p.z - b.z)
+        if (ex < ez) { dx = Math.sign(p.x - b.x) || 1; dz = 0; penH = ex + RAIO }
+        else { dx = 0; dz = Math.sign(p.z - b.z) || 1; penH = ez + RAIO }
+      }
+      const penV = b.h + MARGEM_Y - p.y
+      if (penV < penH) {
+        p.y = b.h + MARGEM_Y // sobe no telhado
+        pousou = true
+      } else {
+        const n = d > 0 ? d : 1
+        p.x += (dx / n) * penH
+        p.z += (dz / n) * penH
+      }
+      mexeu = true
+    }
+    if (!mexeu) break
+  }
+  return pousou
 }
 
-if(sphereSol.position.y > 0){
-	directionalLight.color.set(0xFC5404);
-	directionalLight.position.x = sphereSol.position.x;
-	directionalLight.position.y = sphereSol.position.y;
-	directionalLight.position.z = sphereSol.position.z;
-} else {
-	directionalLight.color.set(0x396992);
-	directionalLight.position.x = sphereLua.position.x;
-	directionalLight.position.y = sphereLua.position.y;
-	directionalLight.position.z = sphereLua.position.z;}
-rumo += velocidadeAngular;
-camera.rotation.y = rumo; 
-renderer.render(scene, camera);
-
-for (var i = 0; i < 5; i++){
-	var atingido = foiAtingido(objetos[i].position.x, objetos[i].position.y, objetos[i].position.z, 
-			sphereRob.position.x, sphereRob.position.y, sphereRob.position.z);
-
-
-	if(atingido){
-			objetos[i].position.x = robo.position.x;
-			objetos[i].position.y = robo.position.y - 5;
-			objetos[i].position.z = robo.position.z;
-	}
-
-}
-};
-
-document.onkeydown = function(e) {
-	console.log(e);
-
-	if(e.key == " "){
-		voar = voar + velVoo;
-		velVoo = velVoo + 0.001;
-	}
-
-	if(e.key == "ArrowUp") {
-		vel = vel + acel;
-		acel = acel + 0.001;
-	}
-
-	if(e.key == "ArrowDown") {
-		vel = vel + acel;
-		acel = acel - 0.001;
-	}
-
-	if(e.key == "ArrowLeft") {
-		velocidadeAngular = 0.05;
-	}
-
-	if(e.key == "ArrowRight") {
-		velocidadeAngular = -0.05;
-	}
-
+// ===== Esferas coletáveis (sempre em lugares livres) =====
+const texEsfera = texLoader.load('Imagens/esfera.jpg')
+const esferas = []
+for (let q = 0; q < TOTAL_ESFERAS; q++) {
+  let x, z
+  do {
+    x = (Math.random() - 0.5) * (larguraTotal - 20)
+    z = (Math.random() - 0.5) * (profundidadeTotal - 20)
+  } while (bate(x, 2, z, 2))
+  const esfera = new THREE.Mesh(new THREE.SphereGeometry(1, 15, 16), new THREE.MeshBasicMaterial({ map: texEsfera }))
+  esfera.position.set(x, 2.5 + Math.random() * 5, z)
+  const ang = Math.random() * Math.PI * 2
+  esfera.userData.vel = new THREE.Vector3(Math.cos(ang) * VEL_ESFERA, 0, Math.sin(ang) * VEL_ESFERA)
+  scene.add(esfera)
+  esferas.push(esfera)
 }
 
-document.onkeyup = function(e) {
-	console.log(e);
-	if(e.key == " "){
-		if(camera.position.y <= 0){
-			voar = 0.1;
-		}else(voar = -0.1)
-	}
+// As esferas deslizam na horizontal e quicam nos prédios e nos limites da cidade
+const RAIO_ESFERA = 1
+function moverEsfera(e, dt) {
+  const p = e.position
+  const v = e.userData.vel
+  p.x += v.x * dt
+  p.z += v.z * dt
 
-	if(e.key == "ArrowUp") {
-		vel = 0.0;
-		acel = 0.0;
-	}
+  if (Math.abs(p.x) > limX) { p.x = limitar(p.x, -limX, limX); v.x *= -1 }
+  if (Math.abs(p.z) > limZ) { p.z = limitar(p.z, -limZ, limZ); v.z *= -1 }
 
-	if(e.key == "ArrowDown") {
-		vel = 0.0;
-		acel = 0.0;
-	}
+  const meio = LARG / 2
+  for (const b of vizinhos(p.x, p.z)) {
+    if (p.y - RAIO_ESFERA >= b.h) continue // passa por cima de prédios baixos
+    const cx = limitar(p.x, b.x - meio, b.x + meio)
+    const cz = limitar(p.z, b.z - meio, b.z + meio)
+    const dx = p.x - cx
+    const dz = p.z - cz
+    const d = Math.hypot(dx, dz)
+    if (d >= RAIO_ESFERA) continue
 
-	if(e.key == "ArrowLeft") {
-		velocidadeAngular = 0.0;
-	}
-
-	if(e.key == "ArrowRight") {
-		velocidadeAngular = 0.0;
-	}
+    let nx, nz, pen
+    if (d > 0) { nx = dx / d; nz = dz / d; pen = RAIO_ESFERA - d }
+    else {
+      const ex = meio - Math.abs(p.x - b.x)
+      const ez = meio - Math.abs(p.z - b.z)
+      if (ex < ez) { nx = Math.sign(p.x - b.x) || 1; nz = 0; pen = ex + RAIO_ESFERA }
+      else { nx = 0; nz = Math.sign(p.z - b.z) || 1; pen = ez + RAIO_ESFERA }
+    }
+    p.x += nx * pen
+    p.z += nz * pen
+    const dot = v.x * nx + v.z * nz
+    if (dot < 0) { v.x -= 2 * dot * nx; v.z -= 2 * dot * nz } // reflete a velocidade
+  }
 }
 
-animate();
+// ===== Robô =====
+let robo
+gltfLoader.load(
+  'modelos/coot_the_robot.glb',
+  (gltf) => {
+    robo = gltf.scene
+    robo.traverse((o) => { if (o.isMesh) o.castShadow = true })
+    scene.add(robo)
+  },
+  undefined,
+  console.error
+)
 
+// ===== Luzes, Sol e Lua =====
+const lanterna = new THREE.PointLight(0xffffff, 3, 6)
+scene.add(lanterna)
+scene.add(new THREE.HemisphereLight(0x777777, 0x000000, 1))
+
+const alvoLuz = new THREE.Object3D()
+alvoLuz.position.set(0, -1, 0)
+scene.add(alvoLuz)
+
+const luzSol = new THREE.DirectionalLight(0xfc5404, 16)
+luzSol.target = alvoLuz
+luzSol.castShadow = true
+luzSol.shadow.mapSize.set(2048, 2048)
+Object.assign(luzSol.shadow.camera, { left: -100, right: 100, top: 100, bottom: -100, near: 0.8, far: 1000 })
+scene.add(luzSol)
+
+const sol = new THREE.Mesh(new THREE.SphereGeometry(10, 15, 16), new THREE.MeshBasicMaterial({ map: texLoader.load('Imagens/Sol.jpeg') }))
+const lua = new THREE.Mesh(new THREE.SphereGeometry(10, 15, 16), new THREE.MeshBasicMaterial({ map: texLoader.load('Imagens/Lua.jpeg') }))
+scene.add(sol, lua)
+
+const RAIO_ORBITA = larguraTotal / 2 + 100
+let anguloSol = 0
+
+// ===== Controles (estado das teclas, com aceleração suave) =====
+const teclas = {}
+addEventListener('keydown', (e) => {
+  teclas[e.code] = true
+  if (e.code === 'Space') e.preventDefault()
+})
+addEventListener('keyup', (e) => (teclas[e.code] = false))
+
+let vel = 0
+let velY = 0
+let rumo = 0
+const limX = larguraTotal / 2 - 10
+const limZ = profundidadeTotal / 2 - 10
+const limitar = THREE.MathUtils.clamp
+
+// Mouse: clique na tela para capturar o cursor (Esc libera)
+const SENS_MOUSE = 0.002
+const DIST_CAMERA = 6 // distância da câmera até o robô
+const INCL_INICIAL = 0.25 // elevação inicial da câmera (um pouco acima, atrás do robô)
+let inclinacao = INCL_INICIAL
+const alvoCam = new THREE.Vector3()
+const posCam = new THREE.Vector3()
+let olharYaw = 0 // giro da câmera em volta do robô (não muda a direção dele)
+renderer.domElement.addEventListener('click', () => {
+  if (jogando) renderer.domElement.requestPointerLock()
+})
+document.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement !== renderer.domElement) return
+  olharYaw -= e.movementX * SENS_MOUSE // gira livremente, 360°
+  inclinacao = limitar(inclinacao + e.movementY * SENS_MOUSE, -0.2, 1.3)
+})
+
+function mover(dx, dz, dy) {
+  const p = jogador
+  p.x = limitar(p.x + dx, -limX, limX)
+  p.z = limitar(p.z + dz, -limZ, limZ)
+  p.y = limitar(p.y + dy, ALTURA_MIN, ALTURA_MAX)
+  if (resolver(p) && velY < 0) velY = 0
+  p.x = limitar(p.x, -limX, limX)
+  p.z = limitar(p.z, -limZ, limZ)
+}
+
+function atualizar(dt) {
+  const frente = (teclas.ArrowUp || teclas.KeyW ? 1 : 0) - (teclas.ArrowDown || teclas.KeyS ? 1 : 0)
+  const giro = (teclas.ArrowLeft || teclas.KeyA ? 1 : 0) - (teclas.ArrowRight || teclas.KeyD ? 1 : 0)
+
+  rumo += giro * GIRO * dt
+  const alvoVel = frente * VEL_MAX
+  vel += Math.sign(alvoVel - vel) * Math.min(Math.abs(alvoVel - vel), ACEL * dt)
+  velY += ((teclas.Space ? 12 : -8) - velY) * Math.min(1, dt * 6)
+
+  mover(-Math.sin(rumo) * vel * dt, -Math.cos(rumo) * vel * dt, velY * dt)
+  // O robô é a posição do jogador
+  robo.position.copy(jogador)
+  robo.rotation.y = Math.PI + rumo
+  lanterna.position.set(jogador.x, jogador.y + 1.5, jogador.z)
+
+  // Ao andar, a câmera volta suavemente para trás do robô (posição inicial)
+  if (frente !== 0) {
+    const k = Math.min(1, dt * 3)
+    inclinacao += (INCL_INICIAL - inclinacao) * k
+    olharYaw -= olharYaw * k
+  }
+
+  // Câmera orbita 360° em volta do robô; se houver prédio no caminho, chega mais perto
+  const ang = rumo + olharYaw
+  alvoCam.set(jogador.x, jogador.y + 1, jogador.z)
+  for (let dist = DIST_CAMERA; dist > 1; dist -= 0.5) {
+    posCam.set(
+      alvoCam.x + Math.sin(ang) * Math.cos(inclinacao) * dist,
+      Math.max(0.5, alvoCam.y + Math.sin(inclinacao) * dist),
+      alvoCam.z + Math.cos(ang) * Math.cos(inclinacao) * dist
+    )
+    if (!bate(posCam.x, posCam.y, posCam.z, 0.5)) break
+  }
+  camera.position.copy(posCam)
+  camera.lookAt(alvoCam)
+
+  // Coleta
+  for (const e of esferas) {
+    e.rotation.y += dt
+    if (e.visible) moverEsfera(e, dt)
+    if (e.visible && e.position.distanceTo(robo.position) < RAIO_COLETA) {
+      e.visible = false
+      placar++
+      atualizarPlacar()
+      if (placar === TOTAL_ESFERAS) vencer()
+    }
+  }
+
+  tempo += dt
+  hudTempo.textContent = `${tempo.toFixed(1)} s`
+}
+
+function atualizarCeu(dt) {
+  anguloSol += dt * 0.03
+  sol.position.set(
+    RAIO_ORBITA * Math.sin(anguloSol) * Math.sin(1.046),
+    RAIO_ORBITA * Math.cos(anguloSol),
+    RAIO_ORBITA * 2 * Math.sin(anguloSol) * Math.cos(1.046)
+  )
+  lua.position.copy(sol.position).multiplyScalar(-1)
+
+  const dia = sol.position.y > 0
+  const astro = dia ? sol : lua
+  luzSol.intensity = astro.position.y / 10
+  luzSol.color.set(dia ? 0xfc5404 : 0x396992)
+  luzSol.position.copy(astro.position)
+}
+
+// ===== Loop principal =====
+const relogio = new THREE.Clock()
+function animar() {
+  requestAnimationFrame(animar)
+  const dt = Math.min(relogio.getDelta(), 0.05)
+  atualizarCeu(dt)
+  if (jogando && robo) atualizar(dt)
+  renderer.render(scene, camera)
+}
+animar()
